@@ -45,8 +45,9 @@ import {
   Video
 } from "lucide-react";
 
-// On Vercel, REACT_APP_BACKEND_URL is unset so API calls go to the same origin
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
+// Dev: REACT_APP_BACKEND_URL=http://localhost:8001
+// Vercel: REACT_APP_BACKEND_URL=/_/backend  (set in Vercel dashboard)
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "/_/backend";
 const API = `${BACKEND_URL}/api`;
 
 const Sidebar = ({ isOpen, setIsOpen }) => {
