@@ -71,8 +71,10 @@ class TranscriptLine(BaseModel):
 
 class MeetingTranscript(BaseModel):
     meeting_id: str
-    source: str  # attio, fireflies
+    source: str  # attio, fireflies, attio_notes
     lines: List[TranscriptLine] = []
+    transcript_url: Optional[str] = None
+    raw_note: Optional[str] = None
     fetched_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
 class MeetingSyncStatus(BaseModel):

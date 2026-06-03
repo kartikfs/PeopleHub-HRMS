@@ -1444,6 +1444,18 @@ async def get_dashboard_trends(
             last_value = trends[key][-1]["value"]
             if first_value > 0:
                 change = ((last_value - first_value) / first_value) * 100
+                changes[key] = round(change, 1)
+            else:
+                changes[key] = 0
+        else:
+            changes[key] = 0
+
+    return {
+        "trends": trends,
+        "changes": changes,
+        "period": period,
+        "data_points": points
+    }
 
 # ============ MEETINGS & RECORDINGS HUB ROUTES ============
 
@@ -1462,6 +1474,37 @@ async def get_meetings_sync_status(current_user: dict = Depends(get_current_user
             "is_syncing": False
         }
     return status
+
+@api_router.get("/meetings/connection-test")
+async def test_meetings_connections(current_user: dict = Depends(get_current_user)):
+    """Test connectivity to Attio and Fireflies APIs"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    results = {"attio": {}, "fireflies": {}}
+
+    # Test Attio
+    try:
+        attio_result = await meetings_service.attio.search_meetings(limit=1)
+        results["attio"] = {
+            "status": "connected",
+            "response_keys": list(attio_result.keys()) if isinstance(attio_result, dict) else str(type(attio_result)),
+            "sample": str(attio_result)[:500]
+        }
+    except Exception as e:
+        results["attio"] = {"status": "error", "error": str(e)}
+
+    # Test Fireflies
+    try:
+        ff_user = await meetings_service.fireflies.get_user_info()
+        results["fireflies"] = {
+            "status": "connected",
+            "user": ff_user
+        }
+    except Exception as e:
+        results["fireflies"] = {"status": "error", "error": str(e)}
+
+    return results
 
 @api_router.post("/meetings/sync")
 async def trigger_meetings_sync(
@@ -1684,31 +1727,6 @@ async def get_fireflies_meetings(
         "offset": offset
     }
 
-@api_router.get("/meetings/{meeting_id}/transcript")
-async def get_meeting_transcript(
-    meeting_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """Get full transcript for a meeting (fetched on-demand)"""
-    # Check if user has access to this meeting
-    meeting = await db.meetings_cache.find_one({"id": meeting_id}, {"_id": 0})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Meeting not found")
-    
-    # Check access
-    if current_user.get("role") != "admin":
-        user_email = current_user.get("email")
-        participant_emails = [p.get("email") for p in meeting.get("participants", [])]
-        if user_email not in participant_emails:
-            raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Fetch transcript
-    transcript = await meetings_service.get_transcript(meeting_id)
-    if not transcript:
-        raise HTTPException(status_code=404, detail="Transcript not available")
-    
-    return transcript.model_dump()
-
 @api_router.get("/meetings/action-items")
 async def get_action_items(
     status: Optional[str] = None,
@@ -1719,24 +1737,23 @@ async def get_action_items(
 ):
     """Get all action items from meetings"""
     query = {}
-    
+
     if status:
         query["status"] = status
-    
+
     if assigned_to:
         query["assigned_to"] = assigned_to
-    
-    # If not admin, filter by assigned_to
+
     if current_user.get("role") != "admin":
         query["assigned_to"] = current_user.get("email")
-    
+
     total = await db.meeting_action_items.count_documents(query)
     items = await db.meeting_action_items.find(query, {"_id": 0}) \
         .sort("created_at", -1) \
         .skip(offset) \
         .limit(limit) \
         .to_list(limit)
-    
+
     return {
         "action_items": items,
         "total": total,
@@ -1751,79 +1768,21 @@ async def update_action_item_status(
     current_user: dict = Depends(get_current_user)
 ):
     """Update action item status"""
-    # Check if item exists
     item = await db.meeting_action_items.find_one({"id": item_id}, {"_id": 0})
     if not item:
         raise HTTPException(status_code=404, detail="Action item not found")
-    
-    # Check access
+
     if current_user.get("role") != "admin":
         if item.get("assigned_to") != current_user.get("email"):
             raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Update
+
     await db.meeting_action_items.update_one(
         {"id": item_id},
         {"$set": {"status": status}}
     )
-    
+
     updated_item = await db.meeting_action_items.find_one({"id": item_id}, {"_id": 0})
     return updated_item
-
-@api_router.get("/employees/{employee_id}/meetings")
-async def get_employee_meetings(
-    employee_id: str,
-    limit: int = 50,
-    offset: int = 0,
-    current_user: dict = Depends(get_current_user)
-):
-    """Get all meetings for a specific employee"""
-    # Get employee
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    # Check access
-    if current_user.get("role") != "admin" and current_user.get("id") != employee_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    employee_email = employee.get("email")
-    
-    # Get meetings
-    query = {"participants.email": employee_email}
-    total = await db.meetings_cache.count_documents(query)
-    meetings = await db.meetings_cache.find(query, {"_id": 0}) \
-        .sort("start_time", -1) \
-        .skip(offset) \
-        .limit(limit) \
-        .to_list(limit)
-    
-    # Calculate stats
-    total_meetings = len(meetings)
-    total_duration = sum(m.get("duration_minutes", 0) for m in meetings)
-    
-    # Top meeting partners
-    partner_counts = {}
-    for meeting in meetings:
-        for p in meeting.get("participants", []):
-            if p.get("email") != employee_email:
-                partner_email = p.get("email")
-                partner_name = p.get("name", partner_email)
-                if partner_email:
-                    partner_counts[partner_email] = partner_counts.get(partner_email, 0) + 1
-    
-    top_partners = sorted(partner_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-    
-    return {
-        "meetings": meetings,
-        "total": total,
-        "stats": {
-            "total_meetings": total_meetings,
-            "total_duration_minutes": total_duration,
-            "avg_duration_minutes": total_duration // total_meetings if total_meetings > 0 else 0,
-            "top_meeting_partners": [{"email": email, "count": count} for email, count in top_partners]
-        }
-    }
 
 @api_router.get("/meetings/search")
 async def search_meetings(
@@ -1833,12 +1792,6 @@ async def search_meetings(
     current_user: dict = Depends(get_current_user)
 ):
     """Global search across meetings"""
-    if semantic:
-        # Semantic search (requires integration with embedding service)
-        # For now, fallback to keyword search
-        pass
-    
-    # Keyword search
     query = {
         "$or": [
             {"title": {"$regex": q, "$options": "i"}},
@@ -1848,20 +1801,90 @@ async def search_meetings(
             {"topics": {"$regex": q, "$options": "i"}}
         ]
     }
-    
-    # If not admin, filter by participation
+
     if current_user.get("role") != "admin":
         query["participants.email"] = current_user.get("email")
-    
+
     meetings = await db.meetings_cache.find(query, {"_id": 0}) \
         .sort("start_time", -1) \
         .limit(limit) \
         .to_list(limit)
-    
+
     return {
         "results": meetings,
         "query": q,
         "count": len(meetings)
+    }
+
+@api_router.get("/meetings/{meeting_id}/transcript")
+async def get_meeting_transcript(
+    meeting_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get full transcript for a meeting (fetched on-demand)"""
+    meeting = await db.meetings_cache.find_one({"id": meeting_id}, {"_id": 0})
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if current_user.get("role") != "admin":
+        user_email = current_user.get("email")
+        participant_emails = [p.get("email") for p in meeting.get("participants", [])]
+        if user_email not in participant_emails:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    transcript = await meetings_service.get_transcript(meeting_id)
+    if not transcript:
+        raise HTTPException(status_code=404, detail="Transcript not available")
+
+    return transcript.model_dump()
+
+@api_router.get("/employees/{employee_id}/meetings")
+async def get_employee_meetings(
+    employee_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get all meetings for a specific employee"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    if current_user.get("role") != "admin" and current_user.get("id") != employee_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    employee_email = employee.get("email")
+
+    query = {"participants.email": employee_email}
+    total = await db.meetings_cache.count_documents(query)
+    meetings = await db.meetings_cache.find(query, {"_id": 0}) \
+        .sort("start_time", -1) \
+        .skip(offset) \
+        .limit(limit) \
+        .to_list(limit)
+
+    total_meetings = len(meetings)
+    total_duration = sum(m.get("duration_minutes", 0) for m in meetings)
+
+    partner_counts = {}
+    for meeting in meetings:
+        for p in meeting.get("participants", []):
+            if p.get("email") != employee_email:
+                partner_email = p.get("email")
+                if partner_email:
+                    partner_counts[partner_email] = partner_counts.get(partner_email, 0) + 1
+
+    top_partners = sorted(partner_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    return {
+        "meetings": meetings,
+        "total": total,
+        "stats": {
+            "total_meetings": total_meetings,
+            "total_duration_minutes": total_duration,
+            "avg_duration_minutes": total_duration // total_meetings if total_meetings > 0 else 0,
+            "top_meeting_partners": [{"email": email, "count": count} for email, count in top_partners]
+        }
     }
 
 

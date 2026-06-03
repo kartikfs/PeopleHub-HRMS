@@ -29,18 +29,20 @@ import EmployeeAttendance from "@/pages/EmployeeAttendance";
 import EmployeeLeaves from "@/pages/EmployeeLeaves";
 import EmployeePayslips from "@/pages/EmployeePayslips";
 import EmployeeDocuments from "@/pages/EmployeeDocuments";
-import { 
-  LayoutDashboard, 
-  Users, 
-  Clock, 
-  Calendar, 
-  Briefcase, 
-  ClipboardCheck, 
-  DollarSign, 
+import Meetings from "@/pages/Meetings";
+import {
+  LayoutDashboard,
+  Users,
+  Clock,
+  Calendar,
+  Briefcase,
+  ClipboardCheck,
+  DollarSign,
   TrendingUp,
   Menu,
   X,
-  Shield
+  Shield,
+  Video
 } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -60,6 +62,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     { path: "/onboarding-enhanced", icon: ClipboardCheck, label: "Onboarding+" },
     { path: "/payroll-enhanced", icon: DollarSign, label: "Payroll+" },
     { path: "/performance", icon: TrendingUp, label: "Performance" },
+    { path: "/meetings", icon: Video, label: "Meetings" },
   ];
 
   return (
@@ -253,6 +256,7 @@ function App() {
           <Route path="/payroll" element={<ProtectedAdminRoute><Layout><Payroll /></Layout></ProtectedAdminRoute>} />
           <Route path="/payroll-enhanced" element={<ProtectedAdminRoute><Layout><PayrollEnhanced /></Layout></ProtectedAdminRoute>} />
           <Route path="/performance" element={<ProtectedAdminRoute><Layout><Performance /></Layout></ProtectedAdminRoute>} />
+          <Route path="/meetings" element={<ProtectedAdminRoute><Layout><Meetings /></Layout></ProtectedAdminRoute>} />
         </Routes>
       </BrowserRouter>
       <Toaster position="top-right" />
