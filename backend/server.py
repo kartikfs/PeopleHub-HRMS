@@ -1906,6 +1906,79 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+@app.on_event("startup")
+async def seed_default_users():
+    """Create default admin + sample employees on first boot if DB is empty."""
+    existing = await db.admin_users.count_documents({})
+    if existing > 0:
+        return
+
+    import uuid as _uuid
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Default admin accounts
+    await db.admin_users.insert_many([
+        {
+            "id": str(_uuid.uuid4()),
+            "email": "admin@peoplehub.com",
+            "hashed_password": hash_password("admin123"),
+            "full_name": "Super Admin",
+            "role": "admin",
+            "created_at": now,
+        },
+        {
+            "id": str(_uuid.uuid4()),
+            "email": "hr.admin@peoplehub.com",
+            "hashed_password": hash_password("admin123"),
+            "full_name": "HR Administrator",
+            "role": "admin",
+            "created_at": now,
+        },
+    ])
+
+    # Sample employees so the dashboard isn't empty
+    import random as _random
+    departments = ["Engineering", "Marketing", "Sales", "HR", "Finance"]
+    positions = {
+        "Engineering": "Software Engineer",
+        "Marketing": "Marketing Manager",
+        "Sales": "Sales Representative",
+        "HR": "HR Coordinator",
+        "Finance": "Financial Analyst",
+    }
+    sample_employees = [
+        ("Alice", "Johnson"), ("Bob", "Smith"), ("Carol", "Williams"),
+        ("David", "Brown"), ("Eva", "Garcia"), ("Frank", "Miller"),
+        ("Grace", "Davis"), ("Henry", "Wilson"), ("Iris", "Moore"),
+        ("Jack", "Taylor"),
+    ]
+    employees = []
+    for i, (first, last) in enumerate(sample_employees):
+        dept = departments[i % len(departments)]
+        join_date = (datetime.now() - timedelta(days=_random.randint(60, 900))).strftime("%Y-%m-%d")
+        dob = (datetime.now() - timedelta(days=_random.randint(9000, 14000))).strftime("%Y-%m-%d")
+        employees.append({
+            "id": f"emp_{i}_{str(_uuid.uuid4())[:6]}",
+            "first_name": first,
+            "last_name": last,
+            "email": f"{first.lower()}.{last.lower()}@peoplehub.com",
+            "hashed_password": hash_password("employee123"),
+            "phone": f"+1-555-{_random.randint(100,999)}-{_random.randint(1000,9999)}",
+            "date_of_birth": dob,
+            "gender": _random.choice(["Male", "Female"]),
+            "address": f"{_random.randint(100,999)} Main St, New York, NY 10001",
+            "department": dept,
+            "position": positions[dept],
+            "employment_type": "Full-time",
+            "join_date": join_date,
+            "salary": float(_random.randint(60000, 130000)),
+            "status": "active",
+            "created_at": now,
+        })
+    await db.employees.insert_many(employees)
+    logger.info("Seeded default admin users and sample employees.")
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
