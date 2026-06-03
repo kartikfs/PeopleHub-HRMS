@@ -17,7 +17,7 @@ import jwt
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 from passlib.context import CryptContext
 import sys
-sys.path.append('/app/backend')
+sys.path.insert(0, str(Path(__file__).parent))
 from models_enhanced import *
 
 # Import meetings modules
